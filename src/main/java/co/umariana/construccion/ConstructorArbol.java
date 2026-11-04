@@ -2,6 +2,13 @@ package co.umariana.construccion;
 
 import co.umariana.modelo.ArbolGenealogico;
 import co.umariana.modelo.ArbolInvalidoException;
+import co.umariana.modelo.Persona;
+import co.umariana.modelo.Posicion;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Construye un árbol genealógico a partir de un texto: cada línea es una persona.
@@ -51,7 +58,107 @@ public final class ConstructorArbol {
      * @throws ArbolInvalidoException si el texto no cumple las reglas
      */
     public static ArbolGenealogico construir(String texto) {
-        // TODO Etapa 3
-        throw new UnsupportedOperationException("TODO: construir");
+        if (texto == null) {
+            throw new ArbolInvalidoException("El texto está vacío.");
+        }
+
+        String[] lineas = texto.split("\\R", -1);
+        List<LineaPersona> personas = new ArrayList<>();
+        Set<String> posiciones = new HashSet<>();
+        for (int i = 0; i < lineas.length; i++) {
+            String linea = lineas[i].trim();
+            if (linea.isEmpty()) {
+                continue;
+            }
+
+            int numeroLinea = i + 1;
+            String[] campos = linea.split(";", -1);
+            if (campos.length < 3 || campos.length > 4) {
+                throw error(numeroLinea, "cada línea debe tener tres o cuatro campos.");
+            }
+
+            String posicion = campos[0].trim();
+            String nombre = campos[1].trim();
+            int nacimiento;
+            Integer fallecimiento = null;
+            try {
+                nacimiento = Integer.parseInt(campos[2].trim());
+                if (campos.length == 4 && !campos[3].trim().isEmpty()) {
+                    fallecimiento = Integer.valueOf(campos[3].trim());
+                }
+            } catch (NumberFormatException e) {
+                throw error(numeroLinea, "el nacimiento y el fallecimiento deben ser números enteros.");
+            }
+
+            Persona persona = new Persona(posicion, nombre, nacimiento, fallecimiento);
+            try {
+                persona.validar();
+            } catch (IllegalArgumentException e) {
+                throw error(numeroLinea, e.getMessage());
+            }
+            if (!posiciones.add(posicion)) {
+                throw error(numeroLinea, "la posición " + posicion + " está repetida.");
+            }
+            personas.add(new LineaPersona(numeroLinea, persona));
+        }
+
+        if (personas.isEmpty()) {
+            throw new ArbolInvalidoException("El texto está vacío.");
+        }
+
+        LineaPersona sujeto = personas.stream()
+                .filter(p -> Posicion.esSujeto(p.persona().getPosicion()))
+                .findFirst()
+                .orElseThrow(() -> new ArbolInvalidoException("Falta la persona de posición 1 (el sujeto)."));
+
+        personas.sort(Comparator.comparingInt((LineaPersona p) -> ordenConstruccion(p.persona()))
+                .thenComparing((a, b) -> compararPosiciones(a.persona().getPosicion(), b.persona().getPosicion())));
+        personas.remove(sujeto);
+
+        ArbolGenealogico arbol = new ArbolGenealogico(sujeto.persona());
+        for (LineaPersona entrada : personas) {
+            try {
+                arbol.agregar(entrada.persona());
+            } catch (IllegalArgumentException e) {
+                throw error(entrada.numeroLinea(), e.getMessage());
+            }
+        }
+        return arbol;
+    }
+
+    private static int ordenConstruccion(Persona persona) {
+        String posicion = persona.getPosicion();
+        if (Posicion.esSujeto(posicion)) {
+            return 0;
+        }
+        if (Posicion.esAscendiente(posicion)) {
+            return 1;
+        }
+        return 2 + Posicion.generacion(posicion);
+    }
+
+    private static int compararPosiciones(String a, String b) {
+        if (Posicion.esAhnentafel(a) && Posicion.esAhnentafel(b)) {
+            return Integer.compare(Integer.parseInt(a), Integer.parseInt(b));
+        }
+        if (Posicion.esDescendiente(a) && Posicion.esDescendiente(b)) {
+            String[] nivelesA = a.split("\\.");
+            String[] nivelesB = b.split("\\.");
+            for (int i = 1; i < Math.min(nivelesA.length, nivelesB.length); i++) {
+                int comparacion = Integer.compare(Integer.parseInt(nivelesA[i]), Integer.parseInt(nivelesB[i]));
+                if (comparacion != 0) {
+                    return comparacion;
+                }
+            }
+            return Integer.compare(nivelesA.length, nivelesB.length);
+        }
+        return 0;
+    }
+
+    private static ArbolInvalidoException error(int linea, String mensaje) {
+        return new ArbolInvalidoException("Línea " + linea + ": " + mensaje);
+    }
+
+    private record LineaPersona(int numeroLinea, Persona persona) {
     }
 }
